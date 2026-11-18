@@ -12,10 +12,10 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref }}
         run: |
-          REGEX='^(feat|fix|chore|docs|refactor|test|ci)/[a-z0-9._-]+$'
+          REGEX='^T[0-9]+-[a-z0-9-]+$'
           if [[ ! "$BRANCH" =~ $REGEX ]]; then
             echo "Nom de branche invalide : $BRANCH"
-            echo "Format attendu : feat/ma-feature, fix/mon-bug, chore/..., etc."
+            echo "Format attendu : ID du backlog + nom, ex. T25-floutage-serveur"
             exit 1
           fi
           echo "Nom de branche valide : $BRANCH"
