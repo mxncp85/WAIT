@@ -1,0 +1,436 @@
+openapi: 3.0.3
+info:
+  title: WAIT! API
+  version: 1.0.0
+  description: >-
+    API du MVP de WAIT!. Toutes les règles (reveal, créneau photo, suppression, droits)
+    sont vérifiées côté serveur. L'original d'une photo n'est jamais servi avant le reveal.
+servers:
+  - url: http://localhost:3000
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/google:
+    post:
+      tags: [Auth]
+      summary: Connexion / inscription Google (F01)
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/SocialLogin' }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '4XX': { $ref: '#/components/responses/Error' }
+  /auth/apple:
+    post:
+      tags: [Auth]
+      summary: Connexion / inscription Apple, obligatoire sur iOS (F02)
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/SocialLogin' }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '4XX': { $ref: '#/components/responses/Error' }
+  /auth/email/register:
+    post:
+      tags: [Auth]
+      summary: Inscription email + mot de passe (F03, RG01, RG02)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, pseudo, acceptedTerms]
+              properties:
+                email: { type: string, format: email }
+                password: { $ref: '#/components/schemas/Password' }
+                pseudo: { $ref: '#/components/schemas/Pseudo' }
+                acceptedTerms: { type: boolean, description: "Conditions + confirmation 15 ans ou plus (doit être true)" }
+      responses:
+        '201': { $ref: '#/components/responses/Auth' }
+        '4XX': { $ref: '#/components/responses/Error' }
+  /auth/email/login:
+    post:
+      tags: [Auth]
+      summary: Connexion email + mot de passe (F03)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Auth' }
+        '4XX': { $ref: '#/components/responses/Error' }
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      summary: Email de réinitialisation du mot de passe (F04)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '204': { description: "Demande prise en compte (toujours 204 : on ne révèle pas si l'email existe)" }
+
+  /profile:
+    get:
+      tags: [Profil]
+      summary: Mon profil (UC02)
+      responses:
+        '200': { description: Profil, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Profil]
+      summary: Modifier pseudo / nom (F05)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pseudo: { $ref: '#/components/schemas/Pseudo' }
+                displayName: { type: string, maxLength: 50 }
+      responses:
+        '200': { description: Profil mis à jour, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Profil]
+      summary: Supprimer mon compte et mes données personnelles (F06)
+      responses:
+        '204': { description: Compte supprimé }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /devices:
+    post:
+      tags: [Notifications]
+      summary: Enregistrer le jeton de notification push (UC09)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pushToken, platform]
+              properties:
+                pushToken: { type: string }
+                platform: { type: string, enum: [ios, android] }
+      responses:
+        '204': { description: Jeton enregistré }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events:
+    get:
+      tags: [Événements]
+      summary: Mes événements, du plus récent au plus ancien (F12)
+      responses:
+        '200': { description: Liste, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Event' } } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Événements]
+      summary: Créer un événement, génère code + lien + QR code (F07, F08, F09)
+      description: >-
+        RG04 : nom 3 à 60 caractères, fin des photos après le début, durée max 72 h.
+        En mode vote, revealAt est l'heure de secours (obligatoire, au plus 24 h après la fin des photos).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, startsAt, photosEndAt, revealMode, revealAt]
+              properties:
+                name: { type: string, minLength: 3, maxLength: 60 }
+                startsAt: { type: string, format: date-time }
+                photosEndAt: { type: string, format: date-time }
+                revealMode: { $ref: '#/components/schemas/RevealMode' }
+                revealAt: { type: string, format: date-time, description: "Heure du reveal (fixed_time) ou heure de secours (vote)" }
+      responses:
+        '201': { description: Événement créé, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/by-code/{code}:
+    get:
+      tags: [Événements]
+      summary: Aperçu avant de rejoindre (UC05)
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-HJ-NP-Z2-9]{6}$' } }
+      responses:
+        '200': { description: Aperçu sans photo, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Événements]
+      summary: État, décompte et compteurs de photos (F18)
+      responses:
+        '200': { description: Événement, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Événements]
+      summary: Modifier nom / heures, organisateur, avant le début (RG09)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 3, maxLength: 60 }
+                startsAt: { type: string, format: date-time }
+                photosEndAt: { type: string, format: date-time }
+                revealAt: { type: string, format: date-time }
+      responses:
+        '200': { description: Événement modifié, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}/join:
+    post:
+      tags: [Événements]
+      summary: Rejoindre avec consentement (F10, F11, RG06, RG07, RG08)
+      parameters:
+        - { $ref: '#/components/parameters/EventId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acceptedTerms]
+              properties:
+                acceptedTerms: { type: boolean, enum: [true] }
+      responses:
+        '200': { description: Rejoint, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}/participants/{userId}:
+    delete:
+      tags: [Événements]
+      summary: Retirer un participant (organisateur) ou quitter (soi-même) (F13)
+      parameters:
+        - { $ref: '#/components/parameters/EventId' }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Participant retiré }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}/photos:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    post:
+      tags: [Photos]
+      summary: Envoyer une photo (F14, F15, F19, RG10, RG11)
+      description: >-
+        takenAt doit être dans le créneau de l'événement. clientPhotoId (UUID généré par l'app)
+        rend l'envoi idempotent : en cas de coupure réseau, le renvoi ne crée pas de doublon.
+        Le floutage est fait côté serveur ; aucune route ne permet de supprimer une photo (F17).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, takenAt, clientPhotoId]
+              properties:
+                file: { type: string, format: binary }
+                takenAt: { type: string, format: date-time }
+                clientPhotoId: { type: string, format: uuid }
+      responses:
+        '201': { description: Photo reçue (200 si déjà reçue), content: { application/json: { schema: { $ref: '#/components/schemas/Photo' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [Photos]
+      summary: Photos floutées avant le reveal, originales après (F16, F26, F27, RG12)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 30, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Page de photos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Photo' } }
+                  nextCursor: { type: string, nullable: true }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}/vote:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    put:
+      tags: [Vote]
+      summary: Voter pour le reveal (F21, RG15, RG17)
+      description: Ouvert 1 h après le début. Majorité des participants actifs atteinte = reveal immédiat.
+      responses:
+        '200': { description: Vote pris en compte, content: { application/json: { schema: { $ref: '#/components/schemas/Vote' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Vote]
+      summary: Retirer son vote avant le reveal (RG17)
+      responses:
+        '200': { description: Vote retiré, content: { application/json: { schema: { $ref: '#/components/schemas/Vote' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /photos/{photoId}/reports:
+    post:
+      tags: [Modération]
+      summary: Signaler une photo ou demander son retrait, après le reveal (F32, RG19)
+      parameters:
+        - { name: photoId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, enum: [inappropriate, appears_on_it] }
+                comment: { type: string, maxLength: 500 }
+      responses:
+        '201': { description: Signalement créé, content: { application/json: { schema: { $ref: '#/components/schemas/Report' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /events/{eventId}/reports:
+    get:
+      tags: [Modération]
+      summary: Signalements de l'événement, organisateur (UC13)
+      parameters:
+        - { $ref: '#/components/parameters/EventId' }
+      responses:
+        '200': { description: Signalements, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Report' } } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+  /reports/{reportId}:
+    patch:
+      tags: [Modération]
+      summary: Masquer ou garder une photo signalée, organisateur (F33, RG20)
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [hide, keep] }
+      responses:
+        '200': { description: Signalement traité, content: { application/json: { schema: { $ref: '#/components/schemas/Report' } } } }
+        '4XX': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    EventId: { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+
+  requestBodies:
+    SocialLogin:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [idToken]
+            properties:
+              idToken: { type: string, description: "Jeton Google/Apple, vérifié par le serveur" }
+              acceptedTerms: { type: boolean, description: "Requis à la création du compte" }
+
+  responses:
+    Auth:
+      description: Session ouverte
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              accessToken: { type: string }
+              refreshToken: { type: string }
+              user: { $ref: '#/components/schemas/User' }
+    Error:
+      description: >-
+        Erreur (401 non connecté, 403 droits insuffisants ou règle de gestion, 404 introuvable ou non
+        accessible, 409 conflit d'état, 422 données invalides)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, message]
+            properties:
+              code: { type: string, example: PHOTO_OUTSIDE_WINDOW }
+              message: { type: string }
+
+  schemas:
+    Pseudo: { type: string, pattern: '^[A-Za-z0-9._]{3,20}$', description: "3 à 20 caractères : lettres, chiffres, point, tiret bas (RG01)" }
+    Password: { type: string, format: password, pattern: '^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$', description: "8 caractères minimum, une lettre et un chiffre (RG02)" }
+    RevealMode: { type: string, enum: [fixed_time, vote] }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        pseudo: { $ref: '#/components/schemas/Pseudo' }
+        displayName: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+    Event:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        startsAt: { type: string, format: date-time }
+        photosEndAt: { type: string, format: date-time }
+        revealMode: { $ref: '#/components/schemas/RevealMode' }
+        revealAt: { type: string, format: date-time }
+        revealedAt: { type: string, format: date-time, nullable: true }
+        status: { type: string, enum: [upcoming, live, awaiting_reveal, revealed] }
+        code: { type: string, example: K7MQ4D }
+        inviteUrl: { type: string, format: uri }
+        myRole: { type: string, enum: [organizer, participant] }
+        participantCount: { type: integer }
+        photoCount: { type: integer, description: "Photos du groupe (F18)" }
+        myPhotoCount: { type: integer, description: "Mes photos (F18)" }
+        vote: { allOf: [{ $ref: '#/components/schemas/Vote' }], nullable: true }
+        deleteAt: { type: string, format: date-time, nullable: true, description: "Suppression automatique, reveal + 30 jours (RG21)" }
+    Vote:
+      type: object
+      properties:
+        isOpen: { type: boolean }
+        yesCount: { type: integer }
+        activeParticipantCount: { type: integer }
+        myVote: { type: boolean }
+    Photo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        takenAt: { type: string, format: date-time }
+        status: { type: string, enum: [processing, blurred, revealed] }
+        blurredUrl: { type: string, nullable: true }
+        originalUrl: { type: string, nullable: true, description: "Lien privé à durée limitée. null avant le reveal (RG12)" }
+        author: { allOf: [{ $ref: '#/components/schemas/User' }], nullable: true, description: "null avant le reveal" }
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        photoId: { type: string, format: uuid }
+        reason: { type: string, enum: [inappropriate, appears_on_it] }
+        status: { type: string, enum: [pending, hidden, kept] }
+        createdAt: { type: string, format: date-time }
