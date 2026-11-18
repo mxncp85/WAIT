@@ -84,7 +84,7 @@ paths:
       responses:
         '204': { description: "Demande prise en compte (toujours 204 : on ne révèle pas si l'email existe)" }
 
-  /me:
+  /profile:
     get:
       tags: [Profil]
       summary: Mon profil (UC02)
